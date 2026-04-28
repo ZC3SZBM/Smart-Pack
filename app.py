@@ -4,10 +4,24 @@ import math
 import io
 
 # =====================================================
-# APP CONFIG
+# PAGE CONFIG
 # =====================================================
-st.set_page_config(page_title="Container Loading Optimizer", layout="wide")
-st.title("🚚 Container Loading Optimizer")
+st.set_page_config(page_title="SmartPack - Container Load Planner", layout="wide")
+
+# =====================================================
+# HEADER (TITLE + RIGHT TEXT)
+# =====================================================
+col1, col2 = st.columns([3, 2])
+with col1:
+    st.title("🚚 SmartPack - Container Load Planner")
+with col2:
+    st.markdown(
+        "<div style='text-align: right; font-weight: 600; padding-top: 18px;'>"
+        "JOHN DEERE LOGISTICS ENGINEERING<br>"
+        "JOHN DEERE KERNERSVILLE"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
 # =====================================================
 # CONTAINER DEFINITIONS
@@ -18,7 +32,17 @@ CONTAINERS = {
     "53 Dry Van": {"L": 16002, "W": 2286, "H": 2590},
 }
 
-REQUIRED_COLUMNS = ["Rack", "Quantity", "Length", "Width", "Height", "Weight"]
+# =====================================================
+# EXPECTED EXCEL COLUMNS
+# =====================================================
+DISPLAY_COLUMNS = [
+    "Rack / Finished Good",
+    "Quantity",
+    "Length (MM)",
+    "Width (MM)",
+    "Height (MM)",
+    "Weight (Kg)",
+]
 
 # =====================================================
 # MAXRECTS GEOMETRY
@@ -64,16 +88,20 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# PACKING ENGINE (EXACT GEOMETRY + CORRECT QUANTITIES)
+# PACKING ENGINE
 # =====================================================
 def pack_containers_exact(df, container):
 
     remaining_qty = {
-        r["Rack"]: int(r["Quantity"]) for _, r in df.iterrows()
+        r["Rack / Finished Good"]: int(r["Quantity"]) for _, r in df.iterrows()
     }
 
     rack_dims = {
-        r["Rack"]: (int(r["Length"]), int(r["Width"]), int(r["Height"]))
+        r["Rack / Finished Good"]: (
+            int(r["Length (MM)"]),
+            int(r["Width (MM)"]),
+            int(r["Height (MM)"]),
+        )
         for _, r in df.iterrows()
     }
 
@@ -82,14 +110,13 @@ def pack_containers_exact(df, container):
     while any(q > 0 for q in remaining_qty.values()):
         bin = MaxRectsBin(container["L"], container["W"])
         load = {}
+        placed_any = False
 
         order = sorted(
             remaining_qty.keys(),
             key=lambda k: rack_dims[k][0] * rack_dims[k][1],
             reverse=True
         )
-
-        placed_any = False
 
         for rack in order:
             qty_left = remaining_qty[rack]
@@ -112,7 +139,7 @@ def pack_containers_exact(df, container):
                 placed_any = True
 
         if not placed_any:
-            raise ValueError("Some racks cannot physically fit in container.")
+            raise ValueError("Some racks cannot physically fit in the selected container.")
 
         containers.append(load)
 
@@ -123,7 +150,7 @@ def pack_containers_exact(df, container):
 # =====================================================
 st.subheader("📄 Download Excel Template")
 
-template_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+template_df = pd.DataFrame(columns=DISPLAY_COLUMNS)
 template_buffer = io.BytesIO()
 with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
     template_df.to_excel(writer, index=False)
@@ -132,7 +159,7 @@ template_buffer.seek(0)
 st.download_button(
     "⬇️ Download Input Template",
     template_buffer,
-    "rack_input_template.xlsx",
+    "smartpack_input_template.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
@@ -145,24 +172,23 @@ uploaded_file = st.file_uploader("Upload filled Excel template", type=["xlsx"])
 
 if uploaded_file:
     df_input = pd.read_excel(uploaded_file)
-
-    missing = [c for c in REQUIRED_COLUMNS if c not in df_input.columns]
+    missing = [c for c in DISPLAY_COLUMNS if c not in df_input.columns]
     if missing:
         st.error(f"Missing columns in Excel: {missing}")
         st.stop()
-
-    df_input = df_input[REQUIRED_COLUMNS].dropna()
-
+    df_input = df_input[DISPLAY_COLUMNS].dropna()
 else:
-    df_base = pd.DataFrame({
-        "Rack": [""],
-        "Quantity": [1],
-        "Length": [0],
-        "Width": [0],
-        "Height": [0],
-        "Weight": [0],
-    })
-    df_input = st.data_editor(df_base, num_rows="dynamic")
+    df_input = st.data_editor(
+        pd.DataFrame({
+            "Rack / Finished Good": [""],
+            "Quantity": [1],
+            "Length (MM)": [0],
+            "Width (MM)": [0],
+            "Height (MM)": [0],
+            "Weight (Kg)": [0],
+        }),
+        num_rows="dynamic"
+    )
 
 container_type = st.selectbox("Container Type", list(CONTAINERS.keys()))
 
@@ -171,8 +197,7 @@ container_type = st.selectbox("Container Type", list(CONTAINERS.keys()))
 # =====================================================
 if st.button("Calculate Loading"):
 
-    data = df_input[df_input["Rack"].astype(str).str.strip() != ""]
-
+    data = df_input[df_input["Rack / Finished Good"].astype(str).str.strip() != ""]
     if data.empty:
         st.error("No valid rack data.")
         st.stop()
@@ -189,7 +214,7 @@ if st.button("Calculate Loading"):
     for i, cont in enumerate(containers, start=1):
         st.write(f"### 🚚 Container {i}")
         st.dataframe(
-            pd.DataFrame(cont.items(), columns=["Rack", "Quantity"]),
+            pd.DataFrame(cont.items(), columns=["Rack / Finished Good", "Quantity"]),
             use_container_width=True
         )
         for r, q in cont.items():
@@ -201,7 +226,8 @@ if st.button("Calculate Loading"):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         pd.DataFrame(
-            output_rows, columns=["Container", "Rack", "Quantity"]
+            output_rows,
+            columns=["Container", "Rack / Finished Good", "Quantity"]
         ).to_excel(writer, index=False)
 
     output.seek(0)
@@ -209,6 +235,6 @@ if st.button("Calculate Loading"):
     st.download_button(
         "📥 Download Loading Plan",
         output,
-        "container_loading_plan.xlsx",
+        "smartpack_container_loading_plan.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
