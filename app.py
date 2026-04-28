@@ -13,10 +13,12 @@ st.title("🚚 Container Loading Optimizer")
 # CONTAINER DEFINITIONS
 # =====================================================
 CONTAINERS = {
-    "40 HC": {"L": 11938, "W": 2286, "H": 2540, "MAX_WT": 20000},
-    "20 HC": {"L": 5898, "W": 2286, "H": 2540, "MAX_WT": 20000},
-    "53 Dry Van": {"L": 16002, "W": 2286, "H": 2590, "MAX_WT": 20000},
+    "40 HC": {"L": 11938, "W": 2286, "H": 2540},
+    "20 HC": {"L": 5898, "W": 2286, "H": 2540},
+    "53 Dry Van": {"L": 16002, "W": 2286, "H": 2590},
 }
+
+REQUIRED_COLUMNS = ["Rack", "Quantity", "Length", "Width", "Height", "Weight"]
 
 # =====================================================
 # MAXRECTS GEOMETRY
@@ -62,7 +64,7 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# CORE PACKING (FIXED QUANTITY LOGIC)
+# PACKING ENGINE (EXACT GEOMETRY + CORRECT QUANTITIES)
 # =====================================================
 def pack_containers_exact(df, container):
 
@@ -81,7 +83,6 @@ def pack_containers_exact(df, container):
         bin = MaxRectsBin(container["L"], container["W"])
         load = {}
 
-        # large footprint first
         order = sorted(
             remaining_qty.keys(),
             key=lambda k: rack_dims[k][0] * rack_dims[k][1],
@@ -118,29 +119,62 @@ def pack_containers_exact(df, container):
     return containers
 
 # =====================================================
-# UI
+# EXCEL TEMPLATE DOWNLOAD
 # =====================================================
-st.subheader("📥 Rack Input")
+st.subheader("📄 Download Excel Template")
 
-df_base = pd.DataFrame({
-    "Rack": [""],
-    "Quantity": [1],
-    "Length": [0],
-    "Width": [0],
-    "Height": [0],
-})
+template_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+template_buffer = io.BytesIO()
+with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
+    template_df.to_excel(writer, index=False)
+template_buffer.seek(0)
 
-df = st.data_editor(df_base, num_rows="dynamic")
-container_type = st.selectbox("Container", list(CONTAINERS.keys()))
+st.download_button(
+    "⬇️ Download Input Template",
+    template_buffer,
+    "rack_input_template.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+# =====================================================
+# INPUT SECTION
+# =====================================================
+st.subheader("📥 Upload Rack Excel or Use Manual Input")
+
+uploaded_file = st.file_uploader("Upload filled Excel template", type=["xlsx"])
+
+if uploaded_file:
+    df_input = pd.read_excel(uploaded_file)
+
+    missing = [c for c in REQUIRED_COLUMNS if c not in df_input.columns]
+    if missing:
+        st.error(f"Missing columns in Excel: {missing}")
+        st.stop()
+
+    df_input = df_input[REQUIRED_COLUMNS].dropna()
+
+else:
+    df_base = pd.DataFrame({
+        "Rack": [""],
+        "Quantity": [1],
+        "Length": [0],
+        "Width": [0],
+        "Height": [0],
+        "Weight": [0],
+    })
+    df_input = st.data_editor(df_base, num_rows="dynamic")
+
+container_type = st.selectbox("Container Type", list(CONTAINERS.keys()))
 
 # =====================================================
 # RUN
 # =====================================================
 if st.button("Calculate Loading"):
 
-    data = df[df["Rack"].astype(str).str.strip() != ""]
+    data = df_input[df_input["Rack"].astype(str).str.strip() != ""]
+
     if data.empty:
-        st.error("No valid input.")
+        st.error("No valid rack data.")
         st.stop()
 
     try:
@@ -149,10 +183,9 @@ if st.button("Calculate Loading"):
         st.error(str(e))
         st.stop()
 
-    # OUTPUT
     st.subheader("📦 Container‑wise Loading Plan")
 
-    rows = []
+    output_rows = []
     for i, cont in enumerate(containers, start=1):
         st.write(f"### 🚚 Container {i}")
         st.dataframe(
@@ -160,21 +193,22 @@ if st.button("Calculate Loading"):
             use_container_width=True
         )
         for r, q in cont.items():
-            rows.append([i, r, q])
+            output_rows.append([i, r, q])
 
     st.subheader("📊 Summary")
     st.success(f"✅ Total Containers Required: {len(containers)}")
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame(rows, columns=["Container", "Rack", "Quantity"]).to_excel(
-            writer, index=False
-        )
+        pd.DataFrame(
+            output_rows, columns=["Container", "Rack", "Quantity"]
+        ).to_excel(writer, index=False)
 
     output.seek(0)
+
     st.download_button(
         "📥 Download Loading Plan",
         output,
         "container_loading_plan.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
