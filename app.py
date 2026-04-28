@@ -9,14 +9,52 @@ import io
 st.set_page_config(page_title="SmartPack - Container Load Planner", layout="wide")
 
 # =====================================================
-# HEADER (TITLE + RIGHT TEXT)
+# GLOBAL CSS (FONT + COLORS)
+# =====================================================
+st.markdown("""
+<style>
+html, body, [class*="css"]  {
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+h1, h2, h3 {
+    color: #1F2937;
+    font-weight: 600;
+}
+
+label {
+    font-weight: 500;
+    color: #1F2937;
+}
+
+.stTextInput input, .stNumberInput input, .stSelectbox select {
+    border-radius: 8px;
+}
+
+.stButton > button {
+    background-color: #22863A;
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 10px 16px;
+}
+
+.stButton > button:hover {
+    background-color: #1E7A35;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
+# HEADER (TITLE LEFT, TEXT RIGHT)
 # =====================================================
 col1, col2 = st.columns([3, 2])
 with col1:
     st.title("🚚 SmartPack - Container Load Planner")
 with col2:
     st.markdown(
-        "<div style='text-align: right; font-weight: 600; padding-top: 18px;'>"
+        "<div style='text-align:right; font-weight:600; color:#1F2937; padding-top:20px;'>"
         "JOHN DEERE LOGISTICS ENGINEERING<br>"
         "JOHN DEERE KERNERSVILLE"
         "</div>",
@@ -33,7 +71,7 @@ CONTAINERS = {
 }
 
 # =====================================================
-# EXPECTED EXCEL COLUMNS
+# EXPECTED INPUT COLUMNS
 # =====================================================
 DISPLAY_COLUMNS = [
     "Rack / Finished Good",
@@ -41,7 +79,7 @@ DISPLAY_COLUMNS = [
     "Length (MM)",
     "Width (MM)",
     "Height (MM)",
-    "Weight (Kg)",
+    "Weight (Kg)"
 ]
 
 # =====================================================
@@ -88,7 +126,7 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# PACKING ENGINE
+# PACKING ENGINE (UNCHANGED LOGIC)
 # =====================================================
 def pack_containers_exact(df, container):
 
@@ -100,7 +138,7 @@ def pack_containers_exact(df, container):
         r["Rack / Finished Good"]: (
             int(r["Length (MM)"]),
             int(r["Width (MM)"]),
-            int(r["Height (MM)"]),
+            int(r["Height (MM)"])
         )
         for _, r in df.iterrows()
     }
@@ -139,28 +177,28 @@ def pack_containers_exact(df, container):
                 placed_any = True
 
         if not placed_any:
-            raise ValueError("Some racks cannot physically fit in the selected container.")
+            raise ValueError("Some racks cannot physically fit in container.")
 
         containers.append(load)
 
     return containers
 
 # =====================================================
-# EXCEL TEMPLATE DOWNLOAD
+# DOWNLOAD EXCEL TEMPLATE
 # =====================================================
 st.subheader("📄 Download Excel Template")
 
 template_df = pd.DataFrame(columns=DISPLAY_COLUMNS)
-template_buffer = io.BytesIO()
-with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
+buffer = io.BytesIO()
+with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
     template_df.to_excel(writer, index=False)
-template_buffer.seek(0)
+buffer.seek(0)
 
 st.download_button(
     "⬇️ Download Input Template",
-    template_buffer,
+    buffer,
     "smartpack_input_template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
 # =====================================================
@@ -202,15 +240,11 @@ if st.button("Calculate Loading"):
         st.error("No valid rack data.")
         st.stop()
 
-    try:
-        containers = pack_containers_exact(data, CONTAINERS[container_type])
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
+    containers = pack_containers_exact(data, CONTAINERS[container_type])
 
-    st.subheader("📦 Container‑wise Loading Plan")
+    st.subheader("📦 Container-wise Loading Plan")
 
-    output_rows = []
+    rows = []
     for i, cont in enumerate(containers, start=1):
         st.write(f"### 🚚 Container {i}")
         st.dataframe(
@@ -218,7 +252,7 @@ if st.button("Calculate Loading"):
             use_container_width=True
         )
         for r, q in cont.items():
-            output_rows.append([i, r, q])
+            rows.append([i, r, q])
 
     st.subheader("📊 Summary")
     st.success(f"✅ Total Containers Required: {len(containers)}")
@@ -226,7 +260,7 @@ if st.button("Calculate Loading"):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         pd.DataFrame(
-            output_rows,
+            rows,
             columns=["Container", "Rack / Finished Good", "Quantity"]
         ).to_excel(writer, index=False)
 
@@ -236,5 +270,5 @@ if st.button("Calculate Loading"):
         "📥 Download Loading Plan",
         output,
         "smartpack_container_loading_plan.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
