@@ -113,7 +113,7 @@ def pack_containers_exact(df, container):
             while remaining[rack] > 0:
                 l = dims[rack]["Length (MM)"]
                 w = dims[rack]["Width (MM)"]
-                h = dims[rack]["Height (MM)")
+                h = dims[rack]["Height (MM)"]
                 wt = dims[rack]["Weight (Kg)"]
 
                 # Calculate allowed quantity FIRST
