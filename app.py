@@ -47,7 +47,7 @@ label {
 """, unsafe_allow_html=True)
 
 # =====================================================
-# HEADER
+# HEADER: LOGO (LEFT) | TITLE (CENTER) | TEXT (RIGHT)
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "john_deere_logo.png")
@@ -58,11 +58,13 @@ with col1:
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=150)
     else:
-        st.markdown("<h3 style='color:#367C2B;'>John Deere</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color:#367C2B;'>John Deere</h3>", unsafe_allow_html=True)
 
 with col2:
-    st.markdown("<h1 style='text-align:center;'>🚚 SmartPack - Container Load Planner</h1>",
-                unsafe_allow_html=True)
+    st.markdown(
+        "<h1 style='text-align:center;'>🚚 SmartPack - Container Load Planner</h1>",
+        unsafe_allow_html=True
+    )
 
 with col3:
     st.markdown(
@@ -76,7 +78,7 @@ with col3:
 st.markdown("---")
 
 # =====================================================
-# CONTAINER DEFINITIONS (WITH WEIGHT LIMIT)
+# CONTAINER DEFINITIONS (18,000 kg limit)
 # =====================================================
 CONTAINER_MAX_WEIGHT = 18000  # kg
 
@@ -95,7 +97,7 @@ DISPLAY_COLUMNS = [
     "Length (MM)",
     "Width (MM)",
     "Height (MM)",
-    "Weight (Kg)"
+    "Weight (Kg)",
 ]
 
 # =====================================================
@@ -124,6 +126,7 @@ class MaxRectsBin:
     def place(self, w, h):
         best = None
         best_score = None
+
         for fr in self.free:
             for pw, ph in ((w, h), (h, w)):
                 if fr.fits(pw, ph):
@@ -131,8 +134,10 @@ class MaxRectsBin:
                     if best is None or score < best_score:
                         best = (fr, pw, ph)
                         best_score = score
+
         if not best:
             return False
+
         fr, pw, ph = best
         self.free.remove(fr)
         self.free.extend(fr.split(pw, ph))
@@ -143,13 +148,16 @@ class MaxRectsBin:
 # =====================================================
 def pack_containers_exact(df, container):
 
-    remaining_qty = {r["Rack / Finished Good"]: int(r["Quantity"]) for _, r in df.iterrows()}
+    remaining_qty = {
+        r["Rack / Finished Good"]: int(r["Quantity"]) for _, r in df.iterrows()
+    }
+
     rack_dims = {
         r["Rack / Finished Good"]: (
             int(r["Length (MM)"]),
             int(r["Width (MM)"]),
             int(r["Height (MM)"]),
-            float(r["Weight (Kg)"])
+            float(r["Weight (Kg)"]),
         )
         for _, r in df.iterrows()
     }
@@ -180,21 +188,17 @@ def pack_containers_exact(df, container):
 
             while qty_left > 0:
 
-                # check volume (floor)
                 if not bin.place(l, w):
                     break
 
-                # how many racks can fit by height
                 max_by_height = min(stack, qty_left)
-
-                # how many racks can fit by weight
-                remaining_weight_capacity = container["MAX_WT"] - current_weight
-                max_by_weight = int(remaining_weight_capacity // wt)
+                remaining_wt_capacity = container["MAX_WT"] - current_weight
+                max_by_weight = int(remaining_wt_capacity // wt)
 
                 add = min(max_by_height, max_by_weight)
-
                 if add <= 0:
-                    return containers + [load]
+                    containers.append(load)
+                    return containers + pack_containers_exact(df[df["Rack / Finished Good"].isin(remaining_qty)], container)
 
                 load[rack] = load.get(rack, 0) + add
                 qty_left -= add
@@ -203,13 +207,12 @@ def pack_containers_exact(df, container):
                 placed_any = True
 
                 if current_weight >= container["MAX_WT"]:
-                    containers.append(load)
                     break
 
-        if placed_any:
-            containers.append(load)
-        else:
-            raise ValueError("No rack fits by either volume or weight.")
+        if not placed_any:
+            raise ValueError("No rack fits due to weight or volume constraints.")
+
+        containers.append(load)
 
     return containers
 
@@ -219,14 +222,17 @@ def pack_containers_exact(df, container):
 st.subheader("📄 Download Excel Template")
 
 template_df = pd.DataFrame(columns=DISPLAY_COLUMNS)
-buf = io.BytesIO()
-with pd.ExcelWriter(buf, engine="openpyxl") as w:
-    template_df.to_excel(w, index=False)
-buf.seek(0)
+buffer = io.BytesIO()
+with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+    template_df.to_excel(writer, index=False)
+buffer.seek(0)
 
-st.download_button("⬇️ Download Input Template", buf,
-                   "smartpack_input_template.xlsx",
-                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+st.download_button(
+    "⬇️ Download Input Template",
+    buffer,
+    "smartpack_input_template.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
 # =====================================================
 # INPUT SECTION
@@ -239,7 +245,14 @@ if uploaded_file:
     df_input = pd.read_excel(uploaded_file)
 else:
     df_input = st.data_editor(
-        pd.DataFrame({c: [""] for c in DISPLAY_COLUMNS}),
+        pd.DataFrame({
+            "Rack / Finished Good": [""],
+            "Quantity": [""],
+            "Length (MM)": [""],
+            "Width (MM)": [""],
+            "Height (MM)": [""],
+            "Weight (Kg)": [""],
+        }),
         num_rows="dynamic"
     )
 
@@ -250,9 +263,19 @@ container_type = st.selectbox("Container Type", list(CONTAINERS.keys()))
 # =====================================================
 if st.button("Calculate Loading"):
 
+    # Remove empty rack names
     data = df_input[df_input["Rack / Finished Good"].astype(str).str.strip() != ""]
+
+    # Convert numeric columns safely
+    numeric_cols = ["Quantity", "Length (MM)", "Width (MM)", "Height (MM)", "Weight (Kg)"]
+    for col in numeric_cols:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    # Drop rows with invalid numerics
+    data = data.dropna(subset=numeric_cols)
+
     if data.empty:
-        st.error("No valid rack data.")
+        st.error("Please enter valid numeric values for all rack fields.")
         st.stop()
 
     containers = pack_containers_exact(data, CONTAINERS[container_type])
@@ -262,23 +285,28 @@ if st.button("Calculate Loading"):
     rows = []
     for i, cont in enumerate(containers, 1):
         st.write(f"### 🚚 Container {i}")
-        st.dataframe(pd.DataFrame(cont.items(),
-                                  columns=["Rack / Finished Good", "Quantity"]),
-                     use_container_width=True)
+        st.dataframe(
+            pd.DataFrame(cont.items(), columns=["Rack / Finished Good", "Quantity"]),
+            use_container_width=True
+        )
         for r, q in cont.items():
             rows.append([i, r, q])
 
     st.subheader("📊 Summary")
     st.success(f"✅ Total Containers Required: {len(containers)}")
 
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as w:
-        pd.DataFrame(rows,
-                     columns=["Container", "Rack / Finished Good", "Quantity"]
-                     ).to_excel(w, index=False)
-    out.seek(0)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(
+            rows,
+            columns=["Container", "Rack / Finished Good", "Quantity"]
+        ).to_excel(writer, index=False)
 
-    st.download_button("📥 Download Loading Plan",
-                       out,
-                       "smartpack_container_loading_plan.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    output.seek(0)
+
+    st.download_button(
+        "📥 Download Loading Plan",
+        output,
+        "smartpack_container_loading_plan.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
