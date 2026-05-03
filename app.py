@@ -47,19 +47,29 @@ label {
 """, unsafe_allow_html=True)
 
 # =====================================================
-# HEADER (TITLE LEFT, TEXT RIGHT)
+# HEADER: LOGO (LEFT) | TITLE (CENTER) | TEXT (RIGHT)
 # =====================================================
-col1, col2 = st.columns([3, 2])
+col1, col2, col3 = st.columns([1.5, 4, 2])
+
 with col1:
-    st.title("🚚 SmartPack - Container Load Planner")
+    st.image("john_deere_logo.png", width=150)
+
 with col2:
     st.markdown(
-        "<div style='text-align:right; font-weight:600; color:#1F2937; padding-top:20px;'>"
+        "<h1 style='text-align:center;'>🚚 SmartPack - Container Load Planner</h1>",
+        unsafe_allow_html=True
+    )
+
+with col3:
+    st.markdown(
+        "<div style='text-align:right; font-weight:600; color:#1F2937; padding-top:22px;'>"
         "JOHN DEERE LOGISTICS ENGINEERING<br>"
         "JOHN DEERE KERNERSVILLE"
         "</div>",
         unsafe_allow_html=True
     )
+
+st.markdown("---")
 
 # =====================================================
 # CONTAINER DEFINITIONS
@@ -126,7 +136,7 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# PACKING ENGINE (UNCHANGED LOGIC)
+# PACKING ENGINE
 # =====================================================
 def pack_containers_exact(df, container):
 
@@ -184,7 +194,7 @@ def pack_containers_exact(df, container):
     return containers
 
 # =====================================================
-# DOWNLOAD EXCEL TEMPLATE
+# EXCEL TEMPLATE DOWNLOAD
 # =====================================================
 st.subheader("📄 Download Excel Template")
 
@@ -242,7 +252,7 @@ if st.button("Calculate Loading"):
 
     containers = pack_containers_exact(data, CONTAINERS[container_type])
 
-    st.subheader("📦 Container-wise Loading Plan")
+    st.subheader("📦 Container‑wise Loading Plan")
 
     rows = []
     for i, cont in enumerate(containers, start=1):
