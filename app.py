@@ -9,28 +9,7 @@ import os
 st.set_page_config(page_title="SmartPack - Container Load Planner", layout="wide")
 
 # =====================================================
-# GLOBAL CSS
-# =====================================================
-st.markdown("""
-<style>
-html, body, [class*="css"] {
-    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
-                 "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-h1, h2, h3 { color: #1F2937; font-weight: 600; }
-label { font-weight: 500; color: #1F2937; }
-.stButton > button {
-    background-color: #22863A;
-    color: white;
-    font-weight: 600;
-    border-radius: 8px;
-}
-.stButton > button:hover { background-color: #1E7A35; }
-</style>
-""", unsafe_allow_html=True)
-
-# =====================================================
-# HEADER
+# HEADER (LOGO | TITLE | JD TEXT)
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "john_deere_logo.png")
@@ -65,8 +44,6 @@ st.markdown("---")
 # =====================================================
 CONTAINERS = {
     "40 HC": {"L": 11938, "W": 2286, "H": 2540, "MAX_WT": 18000},
-    "20 HC": {"L": 5898, "W": 2286, "H": 2540, "MAX_WT": 18000},
-    "53 Dry Van": {"L": 16002, "W": 2286, "H": 2590, "MAX_WT": 18000},
 }
 
 DISPLAY_COLUMNS = [
@@ -89,12 +66,12 @@ class Rect:
         return w <= self.w and h <= self.h
 
     def split(self, w, h):
-        parts = []
+        leftover = []
         if self.w > w:
-            parts.append(Rect(self.x + w, self.y, self.w - w, h))
+            leftover.append(Rect(self.x + w, self.y, self.w - w, h))
         if self.h > h:
-            parts.append(Rect(self.x, self.y + h, self.w, self.h - h))
-        return parts
+            leftover.append(Rect(self.x, self.y + h, self.w, self.h - h))
+        return leftover
 
 
 class MaxRectsBin:
@@ -110,21 +87,22 @@ class MaxRectsBin:
                     return True
         return False
 
+
 # =====================================================
-# PACKING ENGINE (SAFE, NO CASTING INSIDE)
+# PACKING ENGINE (CORRECTED ORDER: QTY → WEIGHT → FLOOR)
 # =====================================================
 def pack_containers_exact(df, container):
 
     remaining = dict(zip(df["Rack / Finished Good"], df["Quantity"]))
     dims = df.set_index("Rack / Finished Good").to_dict("index")
-
     containers = []
 
     while any(v > 0 for v in remaining.values()):
-        bin = MaxRectsBin(container["L"], container["W"])
+        floor = MaxRectsBin(container["L"], container["W"])
         load = {}
-        cur_weight = 0
+        used_weight = 0
 
+        # Larger footprints first
         order = sorted(
             dims.keys(),
             key=lambda r: dims[r]["Length (MM)"] * dims[r]["Width (MM)"],
@@ -135,30 +113,32 @@ def pack_containers_exact(df, container):
             while remaining[rack] > 0:
                 l = dims[rack]["Length (MM)"]
                 w = dims[rack]["Width (MM)"]
-                h = dims[rack]["Height (MM)"]
+                h = dims[rack]["Height (MM)")
                 wt = dims[rack]["Weight (Kg)"]
 
-                if not bin.place(l, w):
-                    break
-
+                # Calculate allowed quantity FIRST
                 max_by_height = container["H"] // h
-                remaining_capacity = container["MAX_WT"] - cur_weight
-                max_by_weight = remaining_capacity // wt
+                max_by_weight = (container["MAX_WT"] - used_weight) // wt
 
-                add = min(remaining[rack], max_by_height, max_by_weight)
-                if add <= 0:
+                add_qty = min(remaining[rack], max_by_height, max_by_weight)
+                if add_qty <= 0:
                     break
 
-                load[rack] = load.get(rack, 0) + add
-                remaining[rack] -= add
-                cur_weight += add * wt
+                # ONLY then reserve floor space
+                if not floor.place(l, w):
+                    break
+
+                load[rack] = load.get(rack, 0) + add_qty
+                remaining[rack] -= add_qty
+                used_weight += add_qty * wt
 
         if not load:
-            raise ValueError("No rack fits due to weight or volume limits.")
+            raise ValueError("No rack fits due to weight or space constraints.")
 
         containers.append(load)
 
     return containers
+
 
 # =====================================================
 # INPUT SECTION
@@ -180,17 +160,17 @@ container_type = st.selectbox("Container Type", CONTAINERS)
 # =====================================================
 if st.button("Calculate Loading"):
 
-    # Remove empty racks
+    # Remove empty rows
     df = df[df["Rack / Finished Good"].astype(str).str.strip() != ""]
 
-    # Convert numeric columns safely
-    for col in DISPLAY_COLUMNS[1:]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Safely convert numerics
+    for c in DISPLAY_COLUMNS[1:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
 
     df = df.dropna()
 
     if df.empty:
-        st.error("Please enter valid numeric values for all rack fields.")
+        st.error("Please enter valid numeric values.")
         st.stop()
 
     containers = pack_containers_exact(df, CONTAINERS[container_type])
@@ -200,7 +180,10 @@ if st.button("Calculate Loading"):
     results = []
     for i, cont in enumerate(containers, 1):
         st.write(f"### 🚚 Container {i}")
-        st.dataframe(pd.DataFrame(cont.items(), columns=["Rack / Finished Good", "Quantity"]))
+        st.dataframe(
+            pd.DataFrame(cont.items(), columns=["Rack / Finished Good", "Quantity"]),
+            use_container_width=True
+        )
         for r, q in cont.items():
             results.append([i, r, q])
 
@@ -212,6 +195,7 @@ if st.button("Calculate Loading"):
             results,
             columns=["Container", "Rack / Finished Good", "Quantity"]
         ).to_excel(writer, index=False)
+
     output.seek(0)
 
     st.download_button(
