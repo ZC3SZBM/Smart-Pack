@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import os
 
 # =====================================================
 # PAGE CONFIG
@@ -8,22 +9,72 @@ import io
 st.set_page_config(page_title="SmartPack - Container Load Planner", layout="wide")
 
 # =====================================================
-# HEADER (TITLE + RIGHT TEXT)
+# GLOBAL CSS (FONT + COLORS)
 # =====================================================
-col1, col2 = st.columns([3, 2])
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+h1 {
+    color: #1F2937;
+    font-weight: 600;
+}
+
+label {
+    font-weight: 500;
+    color: #1F2937;
+}
+
+.stButton > button {
+    background-color: #22863A;
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 10px 16px;
+}
+
+.stButton > button:hover {
+    background-color: #1E7A35;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
+# HEADER (LOGO LEFT, TITLE CENTER, TEXT RIGHT)
+# =====================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(BASE_DIR, "john_deere_logo.png")
+
+col1, col2, col3 = st.columns([1.5, 4, 2])
+
 with col1:
-    st.title("🚚 SmartPack - Container Load Planner")
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=140)
+    else:
+        st.markdown("<h4 style='color:#367C2B;'>John Deere</h4>", unsafe_allow_html=True)
+
 with col2:
     st.markdown(
-        "<div style='text-align:right; font-weight:600; padding-top:18px;'>"
+        "<h1 style='text-align:center;'>🚚 SmartPack - Container Load Planner</h1>",
+        unsafe_allow_html=True
+    )
+
+with col3:
+    st.markdown(
+        "<div style='text-align:right; font-weight:600; padding-top:22px;'>"
         "JOHN DEERE LOGISTICS ENGINEERING<br>"
         "JOHN DEERE KERNERSVILLE"
         "</div>",
         unsafe_allow_html=True
     )
 
+st.markdown("---")
+
 # =====================================================
-# CONTAINER DEFINITIONS
+# CONTAINER DEFINITIONS (UNCHANGED LOGIC)
 # =====================================================
 CONTAINERS = {
     "40 HC": {"L": 11938, "W": 2286, "H": 2540, "MAX_WT": 18000},
@@ -44,7 +95,7 @@ DISPLAY_COLUMNS = [
 ]
 
 # =====================================================
-# MAXRECTS GEOMETRY
+# MAXRECTS GEOMETRY (UNCHANGED)
 # =====================================================
 class Rect:
     def __init__(self, x, y, w, h):
@@ -87,12 +138,13 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# PACKING ENGINE (EARLIER LOGIC + WEIGHT CHECK)
+# PACKING ENGINE (EARLIER LOGIC + WEIGHT LIMIT ONLY)
 # =====================================================
 def pack_containers_exact(df, container):
 
     remaining_qty = {
-        r["Rack / Finished Good"]: int(r["Quantity"]) for _, r in df.iterrows()
+        r["Rack / Finished Good"]: int(r["Quantity"])
+        for _, r in df.iterrows()
     }
 
     rack_dims = {
@@ -110,8 +162,8 @@ def pack_containers_exact(df, container):
     while any(q > 0 for q in remaining_qty.values()):
         bin = MaxRectsBin(container["L"], container["W"])
         load = {}
-        placed_any = False
         current_weight = 0.0
+        placed_any = False
 
         order = sorted(
             remaining_qty.keys(),
@@ -135,13 +187,9 @@ def pack_containers_exact(df, container):
 
                 add = min(stack, qty_left)
 
-                # -------- WEIGHT CHECK ADDED HERE --------
-                potential_weight = current_weight + (add * wt)
-                if potential_weight > container["MAX_WT"]:
-                    # undo footprint usage is NOT needed because
-                    # we stop filling this container immediately
+                # ✅ Weight check AFTER rack is filled (as requested)
+                if current_weight + (add * wt) > container["MAX_WT"]:
                     break
-                # ----------------------------------------
 
                 load[rack] = load.get(rack, 0) + add
                 qty_left -= add
