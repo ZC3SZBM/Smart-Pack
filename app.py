@@ -17,17 +17,14 @@ html, body, [class*="css"] {
     font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
                  "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
-
 h1 {
     color: #1F2937;
     font-weight: 600;
 }
-
 label {
     font-weight: 500;
     color: #1F2937;
 }
-
 .stButton > button {
     background-color: #22863A;
     color: white;
@@ -35,7 +32,6 @@ label {
     border-radius: 8px;
     padding: 10px 16px;
 }
-
 .stButton > button:hover {
     background-color: #1E7A35;
 }
@@ -43,7 +39,7 @@ label {
 """, unsafe_allow_html=True)
 
 # =====================================================
-# HEADER (LOGO LEFT, TITLE CENTER, TEXT RIGHT)
+# HEADER
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "john_deere_logo.png")
@@ -74,7 +70,7 @@ with col3:
 st.markdown("---")
 
 # =====================================================
-# CONTAINER DEFINITIONS
+# CONTAINERS
 # =====================================================
 CONTAINERS = {
     "40 HC": {"L": 11938, "W": 2286, "H": 2540, "MAX_WT": 18000},
@@ -82,9 +78,6 @@ CONTAINERS = {
     "53 Dry Van": {"L": 16002, "W": 2286, "H": 2590, "MAX_WT": 18000},
 }
 
-# =====================================================
-# INPUT COLUMNS
-# =====================================================
 DISPLAY_COLUMNS = [
     "Rack / Finished Good",
     "Quantity",
@@ -95,7 +88,7 @@ DISPLAY_COLUMNS = [
 ]
 
 # =====================================================
-# MAXRECTS GEOMETRY (UNCHANGED)
+# MAXRECTS GEOMETRY
 # =====================================================
 class Rect:
     def __init__(self, x, y, w, h):
@@ -135,10 +128,9 @@ class MaxRectsBin:
         return True
 
 # =====================================================
-# PACKING ENGINE (UNCHANGED BEHAVIOR + WEIGHT LIMIT)
+# PACKING ENGINE (UNCHANGED)
 # =====================================================
 def pack_containers_exact(df, container):
-
     remaining_qty = {
         r["Rack / Finished Good"]: int(r["Quantity"])
         for _, r in df.iterrows()
@@ -183,7 +175,6 @@ def pack_containers_exact(df, container):
                     break
 
                 add = min(stack, qty_left)
-
                 if current_weight + (add * wt) > container["MAX_WT"]:
                     break
 
@@ -194,39 +185,38 @@ def pack_containers_exact(df, container):
                 placed_any = True
 
         if not placed_any:
-            raise ValueError("Some racks cannot physically fit in the selected container.")
+            raise ValueError("Some racks cannot physically fit.")
 
         containers.append(load)
 
     return containers
 
 # =====================================================
-# EXCEL TEMPLATE DOWNLOAD
+# TEMPLATE DOWNLOAD
 # =====================================================
 st.subheader("📄 Download Excel Input Template")
 
 template_df = pd.DataFrame(columns=DISPLAY_COLUMNS)
-template_buffer = io.BytesIO()
-with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
-    template_df.to_excel(writer, index=False)
-template_buffer.seek(0)
+buf = io.BytesIO()
+with pd.ExcelWriter(buf, engine="openpyxl") as w:
+    template_df.to_excel(w, index=False)
+buf.seek(0)
 
 st.download_button(
     "⬇️ Download Input Template",
-    template_buffer,
+    buf,
     "smartpack_input_template.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 # =====================================================
-# INPUT SECTION
+# INPUT
 # =====================================================
 st.subheader("📥 Upload Rack Excel or Use Manual Input")
 
-uploaded_file = st.file_uploader("Upload filled Excel template", type=["xlsx"])
-
-if uploaded_file:
-    df_input = pd.read_excel(uploaded_file)
+uploaded = st.file_uploader("Upload filled Excel template", type=["xlsx"])
+if uploaded:
+    df_input = pd.read_excel(uploaded)
 else:
     df_input = st.data_editor(
         pd.DataFrame({
@@ -254,7 +244,7 @@ if st.button("Calculate Loading"):
 
     containers = pack_containers_exact(data, CONTAINERS[container_type])
 
-    st.subheader("📦 Container‑wise Loading Plan")
+    st.subheader("📦 Container-wise Loading Plan")
 
     container_volume = (
         CONTAINERS[container_type]["L"]
@@ -262,14 +252,11 @@ if st.button("Calculate Loading"):
         * CONTAINERS[container_type]["H"]
     )
 
-    export_rows = []
-
     for i, cont in enumerate(containers, start=1):
         st.write(f"### 🚚 Container {i}")
-        st.dataframe(
-            pd.DataFrame(cont.items(), columns=["Rack / Finished Good", "Quantity"]),
-            use_container_width=True
-        )
+        st.dataframe(pd.DataFrame(cont.items(),
+                                  columns=["Rack / Finished Good", "Quantity"]),
+                     use_container_width=True)
 
         total_weight = 0
         total_volume = 0
@@ -284,43 +271,34 @@ if st.button("Calculate Loading"):
                 * row["Height (MM)"]
             )
 
-            export_rows.append([
-                i,
-                rack,
-                qty,
-                total_weight,
-            ])
-
         weight_util = (total_weight / CONTAINERS[container_type]["MAX_WT"]) * 100
         volume_util = (total_volume / container_volume) * 100
 
         st.markdown(
             f"""
-            **Weight Utilization:** {weight_util:.2f}%  
+            **Weight Used:** {total_weight:.0f} KG ({weight_util:.2f}%)  
             **Volume Utilization:** {volume_util:.2f}%
             """
         )
 
-    st.subheader("📊 Summary")
     st.success(f"✅ Total Containers Required: {len(containers)}")
 
     # =================================================
     # DOWNLOAD LOADING PLAN
     # =================================================
+    export_rows = []
+    for i, cont in enumerate(containers, start=1):
+        for rack, qty in cont.items():
+            export_rows.append([i, rack, qty])
+
     export_df = pd.DataFrame(
         export_rows,
-        columns=[
-            "Container",
-            "Rack / Finished Good",
-            "Quantity",
-            "Container Weight (KG)",
-        ],
+        columns=["Container", "Rack / Finished Good", "Quantity"]
     )
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         export_df.to_excel(writer, index=False, sheet_name="Loading Plan")
-
     output.seek(0)
 
     st.download_button(
